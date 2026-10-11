@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Duo Chat</title>
+<title>Duo Chat 1.4</title>
 <style>
   :root{--bg:#fff;--fg:#1a1a1a;--card:#f2f2f2;--me:#2f7d5b;--accent:#2f7d5b}
   @media(prefers-color-scheme:dark){:root{--bg:#121212;--fg:#eee;--card:#222}}
@@ -27,7 +27,7 @@
 </style>
 </head>
 <body>
-<header>Duo Chat <span id="status">not connected</span></header>
+<header>Duo Chat 1.4<span id="status">not connected</span></header>
 
 <main id="setup">
   <p>Chat directly with one person. No server, nothing stored online.</p>
@@ -63,7 +63,7 @@
 <script>
 const $ = id => document.getElementById(id);
 const BASE = location.href.split('#')[0];
-let pc, dc;
+let pc, dc, ended = false;
 
 // ---------- packing: object -> short text (compress + base64url) ----------
 async function pack(obj){
@@ -98,7 +98,10 @@ const extract = t => t.trim().replace(/^.*#[oa]=/, '');
 // ---------- WebRTC ----------
 function newPC(){
   pc = new RTCPeerConnection({iceServers:[{urls:'stun:stun.l.google.com:19302'}]});
-  pc.onconnectionstatechange = () => { $('status').textContent = pc.connectionState; };
+  pc.onconnectionstatechange = () => {
+    $('status').textContent = pc.connectionState;
+    if (pc.connectionState === 'failed' || pc.connectionState === 'closed') endChat();
+  };
 }
 function waitIce(){
   return new Promise(res => {
@@ -106,6 +109,18 @@ function waitIce(){
     pc.onicegatheringstatechange = () => pc.iceGatheringState === 'complete' && res();
     setTimeout(res, 4000);
   });
+}
+// wipes the chat when the connection ends (runs once, and only if a chat is open)
+function endChat(){
+  if (ended || $('chat').style.display !== 'flex') return;
+  ended = true;
+  $('log').textContent = '';                                // wipe every message from the screen
+  $('txt').value = ''; $('txt').disabled = true; $('btnSend').disabled = true;
+  addMsg('Disconnected. Chat cleared.', 'sys');
+  const b = document.createElement('button');               // a way back to a fresh start
+  b.textContent = 'Start a new chat'; b.style.alignSelf = 'center';
+  b.onclick = () => location.reload();
+  $('log').appendChild(b);
 }
 function setupChannel(){
   dc.onopen = async () => {
@@ -119,15 +134,7 @@ function setupChannel(){
       : 'Connected, but the safety code is unavailable. Do not share anything sensitive.', 'sys');
   };
   dc.onmessage = e => addMsg(e.data, 'them');
-  dc.onclose = () => {
-    $('log').textContent = '';                              // wipe every message from the screen
-    $('txt').value = ''; $('txt').disabled = true; $('btnSend').disabled = true;
-    addMsg('Disconnected. Chat cleared.', 'sys');
-    const b = document.createElement('button');             // a way back to a fresh start
-    b.textContent = 'Start a new chat'; b.style.alignSelf = 'center';
-    b.onclick = () => location.reload();
-    $('log').appendChild(b);
-  };
+  dc.onclose = endChat;
 }
 
 async function createInvite(){
