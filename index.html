@@ -87,16 +87,16 @@ function newPC(){
     {urls:'stun:stun.cloudflare.com:3478'},
     {urls:'stun:stun1.l.google.com:19302'}
   ]});
-  // resolves when gathering finishes, or shortly after the first public address is found (max 15 s)
+  // resolves when gathering is fully finished (max 15 s), so no route is left out
   pc.iceReady = new Promise(res => {
-    let grace;
-    pc.onicecandidate = e => {
-      if (!e.candidate) return res();
-      if (e.candidate.candidate.includes('typ srflx') && !grace) grace = setTimeout(res, 1000);
-    };
+    pc.onicecandidate = e => { if (!e.candidate) res(); };
     setTimeout(res, 15000);
   });
-  pc.onconnectionstatechange = () => { $('status').textContent = pc.connectionState; };
+  pc.onconnectionstatechange = () => {
+    $('status').textContent = pc.connectionState;
+    if (pc.connectionState === 'failed')
+      $('msg').textContent = 'Direct connection failed. Your two networks may block peer-to-peer. Reload both pages and try again.';
+  };
 }
 function waitIce(){ return pc.iceReady; }
 function setupChannel(){
