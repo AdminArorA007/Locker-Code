@@ -16,8 +16,7 @@
   main{flex:1;overflow-y:auto;padding:0 16px 16px}
   button{background:var(--accent);color:#fff;border:0;border-radius:8px;padding:10px 14px;font-size:1rem;margin:4px 4px 4px 0}
   textarea,input{width:100%;background:var(--card);color:var(--fg);border:0;border-radius:8px;padding:10px;font-size:1rem}
-  .box{background:var(--card);border-radius:8px;padding:10px;word-break:break-all;font-size:.8rem;margin:8px 0;max-height:90px;overflow:auto;cursor:pointer}
-  .hint{font-size:.8rem;opacity:.65}
+  .box{background:var(--card);border-radius:8px;padding:10px;word-break:break-all;font-size:.8rem;margin:8px 0;max-height:90px;overflow:auto}
   #chat{display:none;flex-direction:column;flex:1;min-height:0}
   #log{flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:6px;padding:0 16px}
   .m{max-width:80%;padding:8px 12px;border-radius:12px;background:var(--card);align-self:flex-start;white-space:pre-wrap}
@@ -35,7 +34,6 @@
   <button id="btnInvite">Create invite</button>
   <div id="inviteOut" style="display:none">
     <div class="box" id="inviteLink"></div>
-    <div class="hint">Tap the link to copy it</div>
     <button id="btnShareInvite">Share on WhatsApp</button>
     <p>Step 3: when your friend sends a reply link, paste it here:</p>
     <input id="replyIn" placeholder="Paste reply link">
@@ -44,7 +42,6 @@
   <div id="replyOut" style="display:none">
     <h3>Step 2: send this reply back</h3>
     <div class="box" id="replyLink"></div>
-    <div class="hint">Tap the link to copy it</div>
     <button id="btnShareReply">Share on WhatsApp</button>
   </div>
   <h3>Got an invite link?</h3>
@@ -82,23 +79,16 @@ const extract = t => t.trim().replace(/^.*#[oa]=/, '');
 
 // ---------- WebRTC ----------
 function newPC(){
-  pc = new RTCPeerConnection({iceServers:[
-    {urls:'stun:stun.l.google.com:19302'},
-    {urls:'stun:stun.cloudflare.com:3478'},
-    {urls:'stun:stun1.l.google.com:19302'}
-  ]});
-  // resolves when gathering is fully finished (max 15 s), so no route is left out
-  pc.iceReady = new Promise(res => {
-    pc.onicecandidate = e => { if (!e.candidate) res(); };
-    setTimeout(res, 15000);
-  });
-  pc.onconnectionstatechange = () => {
-    $('status').textContent = pc.connectionState;
-    if (pc.connectionState === 'failed')
-      $('msg').textContent = 'Direct connection failed. Your two networks may block peer-to-peer. Reload both pages and try again.';
-  };
+  pc = new RTCPeerConnection({iceServers:[{urls:'stun:stun.l.google.com:19302'}]});
+  pc.onconnectionstatechange = () => { $('status').textContent = pc.connectionState; };
 }
-function waitIce(){ return pc.iceReady; }
+function waitIce(){
+  return new Promise(res => {
+    if (pc.iceGatheringState === 'complete') return res();
+    pc.onicegatheringstatechange = () => pc.iceGatheringState === 'complete' && res();
+    setTimeout(res, 4000);
+  });
+}
 function setupChannel(){
   dc.onopen = async () => {
     $('setup').style.display = 'none';
@@ -110,22 +100,15 @@ function setupChannel(){
 }
 
 async function createInvite(){
-  $('inviteOut').style.display = 'none';
-  $('btnInvite').disabled = true;
-  $('msg').textContent = 'Preparing your link... please wait (up to 15 seconds).';
   newPC();
   dc = pc.createDataChannel('chat'); setupChannel();
   await pc.setLocalDescription(await pc.createOffer());
   await waitIce();
   $('inviteLink').textContent = BASE + '#o=' + await pack(pc.localDescription);
   $('inviteOut').style.display = 'block';
-  $('btnInvite').disabled = false;
-  $('msg').textContent = 'Link ready. Share it now.';
 }
 async function join(code){
   try{
-    $('replyOut').style.display = 'none';
-    $('msg').textContent = 'Preparing your reply... please wait (up to 15 seconds).';
     newPC();
     pc.ondatachannel = e => { dc = e.channel; setupChannel(); };
     await pc.setRemoteDescription(await unpack(code));
@@ -133,15 +116,11 @@ async function join(code){
     await waitIce();
     $('replyLink').textContent = BASE + '#a=' + await pack(pc.localDescription);
     $('replyOut').style.display = 'block';
-    $('msg').textContent = 'Reply ready. Send it back now.';
-  }catch(e){ $('msg').textContent = 'That invite looks invalid, cut short or expired. (' + e.message + ')'; }
+  }catch(e){ $('msg').textContent = 'That invite looks invalid or expired.'; }
 }
 async function finish(code){
-  if (!pc){ $('msg').textContent = 'Create an invite first, then paste the reply.'; return; }
-  try{
-    $('msg').textContent = 'Connecting... this can take a few seconds.';
-    await pc.setRemoteDescription(await unpack(code));
-  }catch(e){ $('msg').textContent = 'That reply looks invalid or cut short. Start again. (' + e.message + ')'; }
+  try{ await pc.setRemoteDescription(await unpack(code)); }
+  catch(e){ $('msg').textContent = 'That reply looks invalid. Start again.'; }
 }
 
 // short number both phones can compare (derived from both DTLS fingerprints)
@@ -176,18 +155,6 @@ async function share(text){
   if (navigator.share) { try{ await navigator.share({text}); return; }catch(e){} }
   try{ await navigator.clipboard.writeText(text); $('msg').textContent = 'Copied. Paste it into WhatsApp.'; }catch(e){}
 }
-
-// click a link box to copy its text
-async function copyBox(el){
-  const text = el.textContent;
-  const range = document.createRange(); range.selectNodeContents(el);
-  const sel = getSelection(); sel.removeAllRanges(); sel.addRange(range);
-  try{ await navigator.clipboard.writeText(text); }
-  catch(e){ document.execCommand('copy'); }
-  $('msg').textContent = 'Link copied. Paste it into WhatsApp.';
-}
-$('inviteLink').onclick = () => copyBox($('inviteLink'));
-$('replyLink').onclick = () => copyBox($('replyLink'));
 
 $('btnInvite').onclick = createInvite;
 $('btnShareInvite').onclick = () => share('Join my private chat: ' + $('inviteLink').textContent);
