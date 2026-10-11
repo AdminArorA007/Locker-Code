@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Duo Chat 1.1</title>
+<title>Duo Chat</title>
 <style>
   :root{--bg:#fff;--fg:#1a1a1a;--card:#f2f2f2;--me:#2f7d5b;--accent:#2f7d5b}
   @media(prefers-color-scheme:dark){:root{--bg:#121212;--fg:#eee;--card:#222}}
@@ -27,7 +27,7 @@
 </style>
 </head>
 <body>
-<header>Duo Chat Ver 1.1<span id="status">not connected</span></header>
+<header>Duo Chat <span id="status">not connected</span></header>
 
 <main id="setup">
   <p>Chat directly with one person. No server, nothing stored online.</p>
@@ -73,11 +73,24 @@ async function pack(obj){
   return btoa(bin).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
 }
 async function unpack(text){
+  if (text.length > 8000) throw new Error('link too long');          // real links are about 1-3 thousand characters
   const b64 = text.replace(/-/g,'+').replace(/_/g,'/');
   const bin = atob(b64);
   const bytes = Uint8Array.from(bin, c => c.charCodeAt(0));
-  const s = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
-  return JSON.parse(await new Response(s).text());
+  const reader = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('deflate-raw')).getReader();
+  const chunks = []; let total = 0;
+  while (true){
+    const {done, value} = await reader.read();
+    if (done) break;
+    total += value.length;
+    if (total > 20000){ reader.cancel(); throw new Error('payload too large'); }   // stops "zip bomb" links
+    chunks.push(value);
+  }
+  const out = new Uint8Array(total); let pos = 0;
+  for (const c of chunks){ out.set(c, pos); pos += c.length; }
+  const obj = JSON.parse(new TextDecoder().decode(out));
+  if (!obj || typeof obj.sdp !== 'string') throw new Error('not a connection code');
+  return obj;
 }
 // accepts a full link or a bare code
 const extract = t => t.trim().replace(/^.*#[oa]=/, '');
@@ -98,7 +111,10 @@ function setupChannel(){
   dc.onopen = async () => {
     $('setup').style.display = 'none';
     $('chat').style.display = 'flex';
-    addMsg('Connected. Safety code: ' + await safetyCode() + ' (compare it with your friend)', 'sys');
+    const code = await safetyCode();
+    addMsg(code
+      ? 'Connected. Safety code: ' + code + '. Ask your friend to read theirs out (call or in person). If it differs, stop chatting.'
+      : 'Connected, but the safety code is unavailable. Do not share anything sensitive.', 'sys');
   };
   dc.onmessage = e => addMsg(e.data, 'them');
   dc.onclose = () => addMsg('Disconnected.', 'sys');
@@ -131,10 +147,12 @@ async function finish(code){
 // short number both phones can compare (derived from both DTLS fingerprints)
 async function safetyCode(){
   const fp = d => (d.sdp.match(/a=fingerprint:\S+ (\S+)/) || [])[1] || '';
-  const joined = [fp(pc.localDescription), fp(pc.remoteDescription)].sort().join();
-  const h = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(joined)));
-  const n = ((h[0]<<24 | h[1]<<16 | h[2]<<8 | h[3]) >>> 0) % 1000000;
-  return String(n).padStart(6, '0');
+  const a = fp(pc.localDescription), b = fp(pc.remoteDescription);
+  if (!a || !b) return null;                                           // cannot verify: caller warns the user
+  const h = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode([a, b].sort().join())));
+  let n = 0; for (let i = 0; i < 6; i++) n = n * 256 + h[i];          // 48 bits
+  const s = String(n % 1e12).padStart(12, '0');                       // 12 digits
+  return s.slice(0,4) + ' ' + s.slice(4,8) + ' ' + s.slice(8);
 }
 
 // ---------- chat UI ----------
@@ -144,13 +162,9 @@ function addMsg(text, who, save = true){
   if (who === 'sys'){ d.style.alignSelf = 'center'; d.style.opacity = .6; d.style.fontSize = '.8rem'; }
   d.textContent = text;
   $('log').appendChild(d); $('log').scrollTop = 1e9;
-  if (save && who !== 'sys'){
-    try{
-      const h = JSON.parse(localStorage.getItem('history') || '[]');
-      h.push([who, text]); localStorage.setItem('history', JSON.stringify(h.slice(-200)));
-    }catch(e){}
-  }
+  // messages live only on screen: nothing is saved in the browser
 }
+try{ localStorage.removeItem('history'); }catch(e){}   // wipe history saved by earlier versions
 function send(){
   const t = $('txt').value.trim();
   if (!t || !dc || dc.readyState !== 'open') return;
