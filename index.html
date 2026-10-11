@@ -82,16 +82,23 @@ const extract = t => t.trim().replace(/^.*#[oa]=/, '');
 
 // ---------- WebRTC ----------
 function newPC(){
-  pc = new RTCPeerConnection({iceServers:[{urls:'stun:stun.l.google.com:19302'}]});
+  pc = new RTCPeerConnection({iceServers:[
+    {urls:'stun:stun.l.google.com:19302'},
+    {urls:'stun:stun.cloudflare.com:3478'},
+    {urls:'stun:stun1.l.google.com:19302'}
+  ]});
+  // resolves when gathering finishes, or shortly after the first public address is found (max 15 s)
+  pc.iceReady = new Promise(res => {
+    let grace;
+    pc.onicecandidate = e => {
+      if (!e.candidate) return res();
+      if (e.candidate.candidate.includes('typ srflx') && !grace) grace = setTimeout(res, 1000);
+    };
+    setTimeout(res, 15000);
+  });
   pc.onconnectionstatechange = () => { $('status').textContent = pc.connectionState; };
 }
-function waitIce(){
-  return new Promise(res => {
-    if (pc.iceGatheringState === 'complete') return res();
-    pc.onicegatheringstatechange = () => pc.iceGatheringState === 'complete' && res();
-    setTimeout(res, 4000);
-  });
-}
+function waitIce(){ return pc.iceReady; }
 function setupChannel(){
   dc.onopen = async () => {
     $('setup').style.display = 'none';
@@ -103,15 +110,22 @@ function setupChannel(){
 }
 
 async function createInvite(){
+  $('inviteOut').style.display = 'none';
+  $('btnInvite').disabled = true;
+  $('msg').textContent = 'Preparing your link... please wait (up to 15 seconds).';
   newPC();
   dc = pc.createDataChannel('chat'); setupChannel();
   await pc.setLocalDescription(await pc.createOffer());
   await waitIce();
   $('inviteLink').textContent = BASE + '#o=' + await pack(pc.localDescription);
   $('inviteOut').style.display = 'block';
+  $('btnInvite').disabled = false;
+  $('msg').textContent = 'Link ready. Share it now.';
 }
 async function join(code){
   try{
+    $('replyOut').style.display = 'none';
+    $('msg').textContent = 'Preparing your reply... please wait (up to 15 seconds).';
     newPC();
     pc.ondatachannel = e => { dc = e.channel; setupChannel(); };
     await pc.setRemoteDescription(await unpack(code));
@@ -119,11 +133,15 @@ async function join(code){
     await waitIce();
     $('replyLink').textContent = BASE + '#a=' + await pack(pc.localDescription);
     $('replyOut').style.display = 'block';
-  }catch(e){ $('msg').textContent = 'That invite looks invalid or expired.'; }
+    $('msg').textContent = 'Reply ready. Send it back now.';
+  }catch(e){ $('msg').textContent = 'That invite looks invalid, cut short or expired. (' + e.message + ')'; }
 }
 async function finish(code){
-  try{ await pc.setRemoteDescription(await unpack(code)); }
-  catch(e){ $('msg').textContent = 'That reply looks invalid. Start again.'; }
+  if (!pc){ $('msg').textContent = 'Create an invite first, then paste the reply.'; return; }
+  try{
+    $('msg').textContent = 'Connecting... this can take a few seconds.';
+    await pc.setRemoteDescription(await unpack(code));
+  }catch(e){ $('msg').textContent = 'That reply looks invalid or cut short. Start again. (' + e.message + ')'; }
 }
 
 // short number both phones can compare (derived from both DTLS fingerprints)
