@@ -31,8 +31,10 @@
 
 <main id="setup">
   <p>Chat directly with one person. No server, nothing stored online.</p>
-  <h3>Step 1: one person starts</h3>
-  <button id="btnInvite">Create invite</button>
+  <div id="step1">
+    <h3>Step 1: one person starts</h3>
+    <button id="btnInvite">Create invite</button>
+  </div>
   <div id="inviteOut" style="display:none">
     <div class="box" id="inviteLink"></div>
     <div class="hint">Tap the link to copy it</div>
@@ -181,10 +183,12 @@ $('txt').onkeydown = e => { if (e.key === 'Enter') send(); };
 
 // opened via link?
 const h = location.hash;
-if (h.startsWith('#o=')) join(h.slice(3));
-else if (h.startsWith('#a=')){
-  if (pc) finish(h.slice(3));
-  else { $('replyIn').value = location.href; $('msg').textContent = 'Reply link received. Create an invite first, then paste it in Step 3.'; }
+if (h.startsWith('#o=')){
+  $('step1').style.display = 'none';   // joining someone's invite: no need to create one
+  join(h.slice(3));
+} else if (h.startsWith('#a=')){
+  $('step1').style.display = 'none';
+  $('msg').textContent = 'This is a reply link. Go to the page where you created the invite and paste it in Step 3 there.';
 }
 </script>
 </body>
