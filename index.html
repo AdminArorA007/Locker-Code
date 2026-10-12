@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Duo Chat 1.4</title>
+<title>Duo Chat 1.5</title>
 <style>
   :root{--bg:#fff;--fg:#1a1a1a;--card:#f2f2f2;--me:#2f7d5b;--accent:#2f7d5b}
   @media(prefers-color-scheme:dark){:root{--bg:#121212;--fg:#eee;--card:#222}}
@@ -27,7 +27,7 @@
 </style>
 </head>
 <body>
-<header>Duo Chat 1.4<span id="status">not connected</span></header>
+<header>Duo Chat 1.5<span id="status">not connected</span></header>
 
 <main id="setup">
   <p>Chat directly with one person. No server, nothing stored online.</p>
@@ -39,19 +39,21 @@
     <div class="box" id="inviteLink"></div>
     <div class="hint">Tap the link to copy it</div>
     <button id="btnShareInvite">Share on WhatsApp</button>
-    <p>Step 3: when your friend sends a reply link, paste it here:</p>
-    <input id="replyIn" placeholder="Paste reply link">
+    <p>Step 3: when your friend sends back a connect phrase, paste it here:</p>
+    <input id="replyIn" placeholder="Paste connect phrase">
     <button id="btnFinish">Connect</button>
   </div>
   <div id="replyOut" style="display:none">
-    <h3>Step 2: send this reply back</h3>
+    <h3>Step 2: send this connect phrase back</h3>
     <div class="box" id="replyLink"></div>
-    <div class="hint">Tap the link to copy it</div>
+    <div class="hint">Tap the phrase to copy it</div>
     <button id="btnShareReply">Share on WhatsApp</button>
   </div>
-  <h3>Got an invite link?</h3>
-  <input id="joinIn" placeholder="Paste invite link (or just open it)">
-  <button id="btnJoin">Join</button>
+  <div id="joinBox">
+    <h3>Got an invite link?</h3>
+    <input id="joinIn" placeholder="Paste invite link (or just open it)">
+    <button id="btnJoin">Join</button>
+  </div>
   <p id="msg"></p>
 </main>
 
@@ -92,8 +94,8 @@ async function unpack(text){
   if (!obj || typeof obj.sdp !== 'string') throw new Error('not a connection code');
   return obj;
 }
-// accepts a full link or a bare code
-const extract = t => t.trim().replace(/^.*#[oa]=/, '');
+// accepts a full link, a bare phrase, or a whole pasted message (uses its last word)
+const extract = t => t.trim().split(/\s+/).pop().replace(/^.*#[oa]=/, '');
 
 // ---------- WebRTC ----------
 function newPC(){
@@ -138,6 +140,7 @@ function setupChannel(){
 }
 
 async function createInvite(){
+  $('joinBox').style.display = 'none';     // creating an invite: no need to join another
   newPC();
   dc = pc.createDataChannel('chat'); setupChannel();
   await pc.setLocalDescription(await pc.createOffer());
@@ -152,7 +155,7 @@ async function join(code){
     await pc.setRemoteDescription(await unpack(code));
     await pc.setLocalDescription(await pc.createAnswer());
     await waitIce();
-    $('replyLink').textContent = BASE + '#a=' + await pack(pc.localDescription);
+    $('replyLink').textContent = await pack(pc.localDescription);   // phrase only, no web address
     $('replyOut').style.display = 'block';
   }catch(e){ $('msg').textContent = 'That invite looks invalid or expired.'; }
 }
@@ -199,14 +202,14 @@ async function copyBox(el){
   const sel = getSelection(); sel.removeAllRanges(); sel.addRange(range);
   try{ await navigator.clipboard.writeText(text); }
   catch(e){ document.execCommand('copy'); }
-  $('msg').textContent = 'Link copied. Paste it into WhatsApp.';
+  $('msg').textContent = 'Copied. Paste it into WhatsApp.';
 }
 $('inviteLink').onclick = () => copyBox($('inviteLink'));
 $('replyLink').onclick = () => copyBox($('replyLink'));
 
 $('btnInvite').onclick = createInvite;
 $('btnShareInvite').onclick = () => share('Join my private chat: ' + $('inviteLink').textContent);
-$('btnShareReply').onclick = () => share('Here is my reply: ' + $('replyLink').textContent);
+$('btnShareReply').onclick = () => share('Here is my connect phrase:\n' + $('replyLink').textContent);
 $('btnFinish').onclick = () => finish(extract($('replyIn').value));
 $('btnJoin').onclick = () => join(extract($('joinIn').value));
 $('btnSend').onclick = send;
@@ -216,9 +219,11 @@ $('txt').onkeydown = e => { if (e.key === 'Enter') send(); };
 const h = location.hash;
 if (h.startsWith('#o=')){
   $('step1').style.display = 'none';   // joining someone's invite: no need to create one
+  $('joinBox').style.display = 'none';
   join(h.slice(3));
 } else if (h.startsWith('#a=')){
   $('step1').style.display = 'none';
+  $('joinBox').style.display = 'none';
   $('msg').textContent = 'This is a reply link. Go to the page where you created the invite and paste it in Step 3 there.';
 }
 </script>
